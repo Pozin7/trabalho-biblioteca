@@ -151,3 +151,39 @@ export async function getLivrosAtrasados(): Promise<LoanDTO[]> {
   });
   return handleResponse<LoanDTO[]>(res);
 }
+
+
+export async function createUsuario(data: any) {
+  const res = await fetch(`${API_URL}/api/users`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+  return handleResponse<any>(res);
+}
+
+export async function createLivro(data: any) {
+  const res = await fetch(`${API_URL}/api/books`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+  return handleResponse<any>(res);
+}
+
+export async function createEmprestimo(data: { userId: string; bookId: string }) {
+  const res = await fetch(`${API_URL}/api/loans`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+  return handleResponse<any>(res);
+}
+
+export async function devolverLivro(loanId: string) {
+  const res = await fetch(`${API_URL}/api/loans/${loanId}/devolver`, {
+    method: "PUT",
+    headers: getHeaders(),
+  });
+  return handleResponse<any>(res);
+}

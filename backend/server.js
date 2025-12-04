@@ -1,3 +1,5 @@
+// Arquivo: back-biblioteca/server.js
+
 const express = require('express');
 const cors = require('cors');
 const { db, inicializarBanco } = require('./database');
@@ -311,27 +313,119 @@ app.get('/api/relatorios/livros-atrasados', autenticar, (req, res) => {
     }
 });
 
+// --- NOVAS ROTAS (ADICIONADAS AQUI) ---
+
+// 1. Criar Usuário
+app.post('/api/users', autenticar, (req, res) => {
+    try {
+        if (req.usuario.role !== 'ADMIN') {
+            return res.status(403).json({ error: 'Acesso negado' });
+        }
+        const { nome, email, password, role } = req.body;
+        if (!nome || !email || !password) {
+            return res.status(400).json({ error: 'Dados incompletos' });
+        }
+        const stmt = db.prepare(`INSERT INTO users (nome, email, password, role) VALUES (?, ?, ?, ?)`);
+        const info = stmt.run(nome, email, password, role || 'ALUNO');
+        res.json({ id: String(info.lastInsertRowid), nome, email, role });
+    } catch (error) {
+        console.error('Erro ao criar usuario:', error);
+        res.status(500).json({ error: 'Erro ao criar usuario (email ja existe?)' });
+    }
+});
+
+// 2. Criar Livro
+app.post('/api/books', autenticar, (req, res) => {
+    try {
+        if (req.usuario.role === 'ALUNO') {
+            return res.status(403).json({ error: 'Acesso negado' });
+        }
+        const { titulo, autor, ano, quantidadeTotal } = req.body;
+        const qtd = Number(quantidadeTotal) || 1;
+        const stmt = db.prepare(`INSERT INTO books (titulo, autor, ano, quantidade_total, quantidade_disponivel) VALUES (?, ?, ?, ?, ?)`);
+        const info = stmt.run(titulo, autor, ano, qtd, qtd);
+        res.json({ id: String(info.lastInsertRowid), titulo });
+    } catch (error) {
+        console.error('Erro ao criar livro:', error);
+        res.status(500).json({ error: 'Erro ao criar livro' });
+    }
+});
+
+// 3. Realizar Empréstimo
+app.post('/api/loans', autenticar, (req, res) => {
+    try {
+        if (req.usuario.role === 'ALUNO') {
+            return res.status(403).json({ error: 'Apenas funcionarios podem registrar emprestimos' });
+        }
+        const { userId, bookId } = req.body;
+        const livro = db.prepare('SELECT quantidade_disponivel FROM books WHERE id = ?').get(bookId);
+        
+        if (!livro || livro.quantidade_disponivel <= 0) {
+            return res.status(400).json({ error: 'Livro indisponivel' });
+        }
+
+        const hoje = new Date();
+        const dataEmprestimo = hoje.toISOString().split('T')[0];
+        const dataPrevistaObj = new Date();
+        dataPrevistaObj.setDate(hoje.getDate() + 7); // 7 dias de prazo
+        const dataPrevista = dataPrevistaObj.toISOString().split('T')[0];
+
+        const transaction = db.transaction(() => {
+            const stmtLoan = db.prepare(`INSERT INTO loans (aluno_id, livro_id, data_emprestimo, data_prevista_devolucao, multa_paga) VALUES (?, ?, ?, ?, 0)`);
+            const info = stmtLoan.run(userId, bookId, dataEmprestimo, dataPrevista);
+            const stmtUpdateBook = db.prepare(`UPDATE books SET quantidade_disponivel = quantidade_disponivel - 1 WHERE id = ?`);
+            stmtUpdateBook.run(bookId);
+            return info;
+        });
+
+        const info = transaction();
+        res.json({ id: String(info.lastInsertRowid), success: true });
+    } catch (error) {
+        console.error('Erro no emprestimo:', error);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// 4. Devolver Livro
+app.put('/api/loans/:id/devolver', autenticar, (req, res) => {
+    try {
+        if (req.usuario.role === 'ALUNO') {
+            return res.status(403).json({ error: 'Acesso negado' });
+        }
+        const loanId = req.params.id;
+        const hoje = new Date();
+        const dataDevolucao = hoje.toISOString().split('T')[0];
+
+        const emprestimo = db.prepare('SELECT * FROM loans WHERE id = ?').get(loanId);
+        if (!emprestimo) return res.status(404).json({ error: 'Emprestimo nao encontrado' });
+        if (emprestimo.data_devolucao) return res.status(400).json({ error: 'Ja devolvido' });
+
+        let multa = 0;
+        const prevista = new Date(emprestimo.data_prevista_devolucao);
+        const diffTime = hoje - prevista;
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays > 0) {
+            multa = diffDays * 2.0; // R$ 2,00 por dia
+        }
+
+        const transaction = db.transaction(() => {
+            db.prepare(`UPDATE loans SET data_devolucao = ?, multa_calculada = ? WHERE id = ?`).run(dataDevolucao, multa, loanId);
+            db.prepare(`UPDATE books SET quantidade_disponivel = quantidade_disponivel + 1 WHERE id = ?`).run(emprestimo.livro_id);
+        });
+
+        transaction();
+        res.json({ success: true, multa });
+    } catch (error) {
+        console.error('Erro na devolucao:', error);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
 inicializarBanco();
 
 app.listen(PORT, () => {
     console.log('='.repeat(50));
     console.log('Backend Biblioteca iniciado!');
     console.log(`Servidor rodando em: http://localhost:${PORT}`);
-    console.log('='.repeat(50));
-    console.log('');
-    console.log('Usuarios de teste:');
-    console.log('  - admin@biblioteca.com / 123456 (ADMIN)');
-    console.log('  - maria@biblioteca.com / 123456 (BIBLIOTECARIO)');
-    console.log('  - joao@aluno.com / 123456 (ALUNO)');
-    console.log('');
-    console.log('Rotas disponiveis:');
-    console.log('  POST /api/auth/login');
-    console.log('  POST /api/auth/logout');
-    console.log('  GET  /api/me');
-    console.log('  GET  /api/books');
-    console.log('  GET  /api/users');
-    console.log('  GET  /api/loans');
-    console.log('  GET  /api/relatorios/livros-por-aluno');
-    console.log('  GET  /api/relatorios/livros-atrasados');
     console.log('='.repeat(50));
 });
