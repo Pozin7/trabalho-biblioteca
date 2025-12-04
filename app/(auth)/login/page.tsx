@@ -19,7 +19,7 @@ export default function LoginPage() {
       await login({ email, password });
       router.push("/");
     } catch (err: any) {
-      setErro(err.message || "Falha ao fazer login");
+      setErro("Falha ao fazer login");
     } finally {
       setLoading(false);
     }
